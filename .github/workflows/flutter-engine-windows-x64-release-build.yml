@@ -7,6 +7,9 @@ jobs:
     runs-on: windows-2019
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Install Depot Tools
         uses: newkdev/setup-depot-tools@v1.0.1
 
@@ -65,12 +68,9 @@ jobs:
             Write-Error "Build output files not found!"
           }
 
-      # The file will be uploaded to the release page of the repository, and the tag is the branch name of the currently executing workflow.
-      - name: Upload files to a GitHub release
-        uses: svenstaro/upload-release-action@2.9.0
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: windows-x64-release.zip
-          tag: ${{ github.ref }}
-          overwrite: true
-          body: "Flutter Engine Release"
+          name: windows-x64-release
+          path: windows-x64-release.zip
+          retention-days: 90
