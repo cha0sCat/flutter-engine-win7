@@ -59,7 +59,8 @@ jobs:
           
           # Generate .dart_tool/package_config.json files (required for build)
           cd src
-          python .\flutter\tools\pub_get_offline.py
+          $dartSdk = ".\flutter\third_party\dart\tools\sdks\dart-sdk\bin\dart.exe"
+          & $dartSdk pub --suppress-analytics get --offline --directory ".\flutter"
           
           # Configure and compile the Flutter engine
           python .\flutter\tools\gn --runtime-mode=release --no-prebuilt-dart-sdk
