@@ -53,8 +53,11 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/rustdesk/engine/raw/refs/heads/main/0001-revert-file_win.cc.patch" -OutFile $filePath
           git apply --directory="src/flutter/third_party/dart" $filePath
           
-          # Compiling the Flutter engine
+          # Generate .dart_tool/package_config.json files (required for build)
           cd src
+          python .\flutter\tools\pub_get_offline.py
+          
+          # Configure and compile the Flutter engine
           python .\flutter\tools\gn --runtime-mode=release --no-prebuilt-dart-sdk
           ninja -C .\out\host_release
           
