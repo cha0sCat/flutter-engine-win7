@@ -1,13 +1,24 @@
-name: Build Flutter Engine
+name: Build Flutter Engine (Win7)
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_ref:
+        description: Flutter tag/branch/commit
+        required: true
+        default: 3.38.3
+      enable_tmate:
+        description: Enable interactive tmate session
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build-engine:
-    runs-on: windows-2019
+    runs-on: windows-2022
 
     steps:
-      - name: Checkout repository
+      - name: Checkout patches repo
         uses: actions/checkout@v4
 
       - name: Install Depot Tools
@@ -16,62 +27,108 @@ jobs:
       - name: Set environment variables
         run: |
           echo "DEPOT_TOOLS_WIN_TOOLCHAIN=0" >> $env:GITHUB_ENV
-          echo "GYP_MSVS_OVERRIDE_PATH=C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise" >> $env:GITHUB_ENV
           echo "WINDOWSSDKDIR=C:\Program Files (x86)\Windows Kits\10" >> $env:GITHUB_ENV
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -products * -latest -property installationPath
+          if (-not $vsPath) {
+            throw "Visual Studio not found via vswhere at $vswhere"
+          }
+          echo "GYP_MSVS_OVERRIDE_PATH=$vsPath" >> $env:GITHUB_ENV
 
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
+        if: ${{ inputs.enable_tmate }}
         with:
           limit-access-to-actor: true
-          
-      - name: Fetch Flutter
+
+      - name: Checkout Flutter (3.38.3+)
+        uses: actions/checkout@v4
+        with:
+          repository: flutter/flutter
+          path: flutter
+          ref: ${{ inputs.flutter_ref }}
+          fetch-depth: 1
+
+      - name: gclient sync
+        working-directory: flutter
         run: |
-          mkdir engine
-          cd engine
-          
-          fetch flutter
-          git -C src/flutter checkout 3.38.3
-
-          $filePath = "src/flutter/shell/platform/windows/flutter_windows_engine.cc"
-          (Get-Content $filePath) -replace 'ClearCurrent', 'MakeCurrent' | Set-Content $filePath
-
-          $filePath = "src/flutter/fml/hex_codec.h"
-          (Get-Content $filePath | ForEach-Object { if ($_ -eq '#include <string_view>') {"#include <string>`n" + $_} else {$_}}) | Set-Content $filePath
-
-          git -C src/flutter status
-          
+          Copy-Item -Force engine\scripts\standard.gclient .gclient
           gclient sync -D
 
-          # fix https://github.com/rustdesk/rustdesk/issues/10085
-          $filePath = "revert_to_gethostname.zip"
-          Invoke-WebRequest -Uri "https://dart-review.googlesource.com/changes/sdk~320620/revisions/2/patch?zip&path=runtime%2Fbin%2Fplatform_win.cc" -OutFile $filePath
-          Expand-Archive -Path $filePath -DestinationPath "."
-          git apply --directory="src/flutter/third_party/dart" 987dbe0.diff
+      - name: Apply Win7 patches
+        working-directory: flutter
+        run: |
+          $patchRoot = "${{ github.workspace }}"
 
-          # fix https://github.com/dart-lang/sdk/commit/34213ba60578e46fc2455c5a56b09d9efabc532b#diff-8b21f02c32c6647079e2c07e7c6ddfff74ac69f81331f9ed67429125e9fe16aa
-          $filePath = "0001-Revert-win-unwinding-Remove-Windows7-handling-of-unw.patch"
-          Invoke-WebRequest -Uri "https://github.com/rustdesk/engine/raw/refs/heads/main/0001-Revert-win-unwinding-Remove-Windows7-handling-of-unw.patch" -OutFile $filePath
-          git apply --directory="src/flutter/third_party/dart" $filePath
+          function Apply-PatchIfNeeded([string]$dir, [string]$patchPath) {
+            git apply --check --directory=$dir $patchPath
+            if ($LASTEXITCODE -eq 0) {
+              git apply --directory=$dir $patchPath
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to apply patch: $patchPath"
+              }
+              return
+            }
 
-          # fix https://dart-review.googlesource.com/c/sdk/+/335940/22/runtime/bin/file_win.cc#642
-          $filePath = "0001-revert-file_win.cc.patch"
-          Invoke-WebRequest -Uri "https://github.com/rustdesk/engine/raw/refs/heads/main/0001-revert-file_win.cc.patch" -OutFile $filePath
-          git apply --directory="src/flutter/third_party/dart" $filePath
-          
-          # Compiling the Flutter engine
-          cd src
+            git apply --reverse --check --directory=$dir $patchPath
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Patch already applied: $patchPath"
+              return
+            }
+
+            throw "Patch does not apply: $patchPath"
+          }
+
+          Apply-PatchIfNeeded "engine/src/flutter" "$patchRoot\0001-hex_codec-include-string.patch"
+          Apply-PatchIfNeeded "engine/src/flutter/third_party/dart" "$patchRoot\0001-revert-platform_win.cc.patch"
+          Apply-PatchIfNeeded "engine/src/flutter/third_party/dart" "$patchRoot\0001-Revert-win-unwinding-Remove-Windows7-handling-of-unw.patch"
+          Apply-PatchIfNeeded "engine/src/flutter/third_party/dart" "$patchRoot\0001-revert-file_win.cc.patch"
+
+      - name: Build engine
+        working-directory: flutter/engine/src
+        run: |
           python .\flutter\tools\gn --runtime-mode=release --no-prebuilt-dart-sdk
           ninja -C .\out\host_release
-          
-          # Check and compress files
+
+      - name: Package artifacts
+        working-directory: flutter/engine/src
+        run: |
           $outputPath = "${{ github.workspace }}\windows-x64-release.zip"
-          $filesToCompress = Get-ChildItem -Path .\out\host_release\ | Where-Object { $_.Name -in @("flutter_windows.dll", "flutter_windows.dll.pdb", "flutter_windows.dll.exp", "flutter_windows.dll.lib", "flutter_windows.h", "flutter_export.h", "flutter_messenger.h", "flutter_plugin_registrar.h", "flutter_texture_registrar.h", "license.windows_flutter.md", "gen_snapshot.exe") }
-          $filesToCompressPaths = $filesToCompress.FullName
-          if ($filesToCompressPaths) {
-            Compress-Archive -Path $filesToCompressPaths -DestinationPath $outputPath
-          } else {
-            Write-Error "Build output files not found!"
+
+          $stageDir = Join-Path $PWD "stage"
+          if (Test-Path $stageDir) {
+            Remove-Item -Recurse -Force $stageDir
           }
+          New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+
+          $filesToStage = @(
+            ".\\out\\host_release\\flutter_windows.dll",
+            ".\\out\\host_release\\flutter_windows.dll.pdb",
+            ".\\out\\host_release\\flutter_windows.dll.exp",
+            ".\\out\\host_release\\flutter_windows.dll.lib",
+            ".\\out\\host_release\\gen_snapshot.exe",
+            ".\\flutter\\shell\\platform\\windows\\public\\flutter_windows.h",
+            ".\\flutter\\shell\\platform\\common\\public\\flutter_export.h",
+            ".\\flutter\\shell\\platform\\common\\public\\flutter_messenger.h",
+            ".\\flutter\\shell\\platform\\common\\public\\flutter_plugin_registrar.h",
+            ".\\flutter\\shell\\platform\\common\\public\\flutter_texture_registrar.h",
+            ".\\out\\host_release\\gen\\flutter\\build\\archives\\LICENSE.windows_flutter.md"
+          )
+
+          foreach ($file in $filesToStage) {
+            if (-not (Test-Path $file)) {
+              throw "Missing build output file: $file"
+            }
+            Copy-Item -Force $file (Join-Path $stageDir ([System.IO.Path]::GetFileName($file)))
+          }
+
+          $license = Join-Path $stageDir "LICENSE.windows_flutter.md"
+          if (Test-Path $license) {
+            Rename-Item -Force $license "license.windows_flutter.md"
+          }
+
+          Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $outputPath
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
