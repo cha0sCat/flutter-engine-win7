@@ -38,7 +38,7 @@ jobs:
 
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
-        if: ${{ inputs.enable_tmate || failure() }}
+        if: ${{ inputs.enable_tmate}}
         with:
           limit-access-to-actor: true
 
@@ -136,3 +136,9 @@ jobs:
           name: windows-x64-release
           path: windows-x64-release.zip
           retention-days: 90
+
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ failure() }}
+        with:
+          limit-access-to-actor: true
