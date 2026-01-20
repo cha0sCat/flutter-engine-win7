@@ -36,11 +36,11 @@ jobs:
           }
           echo "GYP_MSVS_OVERRIDE_PATH=$vsPath" >> $env:GITHUB_ENV
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        if: ${{ inputs.enable_tmate }}
-        with:
-          limit-access-to-actor: true
+      # - name: Setup tmate session
+      #   uses: mxschmitt/action-tmate@v3
+      #   if: ${{ inputs.enable_tmate }}
+      #   with:
+      #     limit-access-to-actor: true
 
       - name: Checkout Flutter (3.38.3+)
         uses: actions/checkout@v4
