@@ -46,18 +46,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: flutter/flutter
-          path: flutter
+          path: f
           ref: ${{ inputs.flutter_ref }}
           fetch-depth: 1
 
       - name: gclient sync
-        working-directory: flutter
+        working-directory: f
         run: |
           Copy-Item -Force engine\scripts\standard.gclient .gclient
           gclient sync -D
 
       - name: Apply Win7 patches
-        working-directory: flutter
+        working-directory: f
         run: |
           $patchRoot = "${{ github.workspace }}"
 
@@ -86,13 +86,13 @@ jobs:
           Apply-PatchIfNeeded "engine/src/flutter/third_party/dart" "$patchRoot\0001-revert-file_win.cc.patch"
 
       - name: Build engine
-        working-directory: flutter/engine/src
+        working-directory: f/engine/src
         run: |
           python .\flutter\tools\gn --runtime-mode=release --no-prebuilt-dart-sdk
           ninja -C .\out\host_release
 
       - name: Package artifacts
-        working-directory: flutter/engine/src
+        working-directory: f/engine/src
         run: |
           $outputPath = "${{ github.workspace }}\windows-x64-release.zip"
 
